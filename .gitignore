@@ -352,3 +352,6 @@ MigrationBackup/
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
 build-bep5mono.ps1
+
+#submodule things we don't use
+UnityCapture/UnityCaptureSample
