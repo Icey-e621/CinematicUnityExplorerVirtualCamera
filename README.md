@@ -56,6 +56,7 @@ Nightly builds can be found [here](https://github.com/originalnicodr/CinematicUn
 1. Unzip the release file into a folder
 2. Copy the DLL inside the `Mods` folder into your MelonLoader `Mods` folder
 3. Copy all of the DLLs inside the `UserLibs` folder into your MelonLoader `UserLibs` folder
+4. Copy into `UserLibs` [this file](https://github.com/schellingb/UnityCapture/blob/master/UnityCaptureSample/Assets/UnityCapture/Plugins/x86/UnityCapturePlugin.dll)
 
 ## Standalone
 
