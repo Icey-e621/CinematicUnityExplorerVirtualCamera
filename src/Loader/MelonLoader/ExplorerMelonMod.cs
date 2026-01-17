@@ -20,6 +20,7 @@ namespace UnityExplorer
 {
     public class ExplorerMelonMod : MelonMod, IExplorerLoader
     {
+
         public string ExplorerFolderName => ExplorerCore.DEFAULT_EXPLORER_FOLDER_NAME;
         public string ExplorerFolderDestination => MelonHandler.ModsDirectory;
 
@@ -43,6 +44,14 @@ namespace UnityExplorer
         {
             _configHandler = new MelonLoaderConfigHandler();
             ExplorerCore.Init(this);
+
+            // Locating the plugin in the modern MelonHandler
+            var targetPlugin = MelonHandler.Plugins.FirstOrDefault(p => p.Info.Name == "UnityCapturePlugin");
+
+            if (targetPlugin != null)
+            {
+                MelonLogger.Msg("Found plugin! Calling global class...");
+            }
         }
     }
 }

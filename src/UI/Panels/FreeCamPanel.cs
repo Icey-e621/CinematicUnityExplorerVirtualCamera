@@ -6,6 +6,12 @@ using UniverseLib.UI;
 using UniverseLib.UI.Models;
 using System.Runtime.InteropServices;
 using CinematicUnityExplorer.Cinematic;
+using UnityEngine.Rendering;
+using Mono.Cecil;
+using MelonLoader;
+
+
+
 
 #if UNHOLLOWER
 using UnhollowerRuntimeLib;
@@ -35,6 +41,7 @@ namespace UnityExplorer.UI.Panels
             }
         }
 
+
         public override string Name => "Freecam";
         public override UIManager.Panels PanelType => UIManager.Panels.Freecam;
         public override int MinWidth => 500;
@@ -44,12 +51,17 @@ namespace UnityExplorer.UI.Panels
         public override bool NavButtonWanted => true;
         public override bool ShouldSaveActiveState => true;
 
+        internal static RenderTexture virtualCameraRenderTexture;
+        private const int VIRTUAL_CAMERA_WIDTH = 1920;
+        private const int VIRTUAL_CAMERA_HEIGHT = 1080;
+
         internal static bool inFreeCamMode;
         public static Camera ourCamera;
         public static Camera lastMainCamera;
         public static Camera cameraMatrixOverrider;
         internal static FreeCamBehaviour freeCamScript;
         internal static CatmullRom.CatmullRomMover cameraPathMover;
+        internal static CameraExternal cameraExternal;
 
         internal static float desiredMoveSpeed = 5f;
 
@@ -72,6 +84,7 @@ namespace UnityExplorer.UI.Panels
         internal static FreeCameraType currentCameraType;
         public static Toggle blockFreecamMovementToggle;
         public static Toggle blockGamesInputOnFreecamToggle;
+        public static Toggle SendCameraToVirtualCameraToggle;
         static InputFieldRef positionInput;
         static InputFieldRef moveSpeedInput;
         static InputFieldRef componentsToDisableInput;
@@ -243,6 +256,118 @@ namespace UnityExplorer.UI.Panels
                 originalCameraRotation = Quaternion.identity;
         }
 
+        public static void AttachAndOpen()
+        {
+            if (cameraExternal == null)
+            {
+                try
+                {
+                    cameraExternal = new CameraExternal(ECaptureDevice.CaptureDevice1);
+
+                    // Create RenderTexture if it doesn't exist
+                    if (virtualCameraRenderTexture == null)
+                    {
+                        virtualCameraRenderTexture = new RenderTexture(
+                            VIRTUAL_CAMERA_WIDTH,
+                            VIRTUAL_CAMERA_HEIGHT,
+                            24,
+                            RenderTextureFormat.ARGB32
+                        );
+                        virtualCameraRenderTexture.Create();
+                    }
+
+                    // Assign RenderTexture to camera
+                    if (ourCamera != null)
+                    {
+                        ourCamera.targetTexture = virtualCameraRenderTexture;
+                    }
+
+                    MelonLogger.Msg("Virtual camera initialized successfully");
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Error($"Failed to initialize virtual camera: {ex}");
+                    EndRetachAndClose();
+                }
+            }
+        }
+
+        public static void SendTextureToVirtualCamera()
+        {
+            if (cameraExternal != null && ourCamera != null && virtualCameraRenderTexture != null)
+            {
+                try
+                {
+                    var result = cameraExternal.SendTexture(
+                        virtualCameraRenderTexture.GetNativeTexturePtr(),
+                        1000,
+                        false,
+                        EResizeMode.LinearResize,
+                        EMirrorMode.MirrorHorizontally
+                    );
+
+                    switch (result)
+                    {
+                        case ECaptureSendResult.SUCCESS:
+                            break;
+                        case ECaptureSendResult.ERROR_UNSUPPORTEDGRAPHICSDEVICE:
+                            MelonLogger.Error("[UnityCapture] Unsupported graphics device (only D3D11 supported)");
+                            EndRetachAndClose();
+                            break;
+                        case ECaptureSendResult.ERROR_PARAMETER:
+                            MelonLogger.Error("[UnityCapture] Input parameter error");
+                            break;
+                        case ECaptureSendResult.ERROR_TOOLARGERESOLUTION:
+                            MelonLogger.Error("[UnityCapture] Render resolution is too large");
+                            EndRetachAndClose();
+                            break;
+                        case ECaptureSendResult.ERROR_TEXTUREFORMAT:
+                            MelonLogger.Error("[UnityCapture] Unsupported texture format");
+                            EndRetachAndClose();
+                            break;
+                        case ECaptureSendResult.ERROR_READTEXTURE:
+                            MelonLogger.Error("[UnityCapture] Error reading texture data");
+                            break;
+                        case ECaptureSendResult.ERROR_INVALIDCAPTUREINSTANCEPTR:
+                            MelonLogger.Error("[UnityCapture] Invalid capture instance pointer");
+                            EndRetachAndClose();
+                            break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Error($"Error sending texture to virtual camera: {ex}");
+                }
+            }
+        }
+        public static void EndRetachAndClose()
+        {
+            if (ourCamera != null)
+            {
+                ourCamera.targetTexture = null;
+            }
+
+            if (virtualCameraRenderTexture != null)
+            {
+                virtualCameraRenderTexture.Release();
+                GameObject.Destroy(virtualCameraRenderTexture);
+                virtualCameraRenderTexture = null;
+            }
+
+            if (cameraExternal != null)
+            {
+                try
+                {
+                    cameraExternal.Close();
+                    MelonLogger.Msg("Virtual camera Closed Successfully");
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Error($"Error closing camera external: {ex}");
+                }
+                cameraExternal = null;
+            }
+        }
         static void SetupFreeCamera()
         {
             switch ((FreeCameraType)cameraTypeDropdown.value)
@@ -431,7 +556,13 @@ namespace UnityExplorer.UI.Panels
             if (lastMainCamera)
                 lastMainCamera.enabled = true;
 
+            if (SendCameraToVirtualCameraToggle.isOn)
+            {
+                EndRetachAndClose();
+            }
+
             freecamCursorUnlocker.Disable();
+
         }
 
         internal static void MaybeResetFreecam()
@@ -684,6 +815,23 @@ namespace UnityExplorer.UI.Panels
                 blockGamesInputOnFreecamToggle.isOn = true;
                 blockGamesInputOnFreecamText.text = "Block games input on Freecam";
             }
+
+            AddSpacer(5);
+
+            GameObject SendCameraToVirtualCamera = UIFactory.CreateToggle(togglesRow, "SendCameraToVirtualCamera", out SendCameraToVirtualCameraToggle, out Text SendCameraToVirtualCameraText);
+            SendCameraToVirtualCameraText.text = "Send to virtual camera";
+            SendCameraToVirtualCameraToggle.isOn = false;
+            SendCameraToVirtualCameraToggle.onValueChanged.AddListener((value) => {
+                if (value && inFreeCamMode)
+                {
+                    AttachAndOpen();
+                }
+                else
+                {
+                    EndRetachAndClose();
+                }
+            });
+            UIFactory.SetLayoutElement(SendCameraToVirtualCamera, minHeight: 25, flexibleWidth: 9999);
 
             AddSpacer(5);
 
@@ -1338,6 +1486,11 @@ namespace UnityExplorer.UI.Panels
         {
             UpdateRelativeMatrix();
             MaybeUpdateHDRPCameraPositionSettings();
+
+            if (FreeCamPanel.inFreeCamMode && FreeCamPanel.SendCameraToVirtualCameraToggle.isOn)
+            {
+                FreeCamPanel.SendTextureToVirtualCamera();
+            }
         }
 
         internal void UpdateRelativeMatrix() {
@@ -1730,8 +1883,15 @@ namespace UnityExplorer.UI.Panels
             }
 
             EventInfo onBeforeRenderEvent = typeof(Application).GetEvent("onBeforeRender");
-            if (onBeforeRenderEvent != null) {
-                onBeforeRenderEvent.RemoveEventHandler(null, onBeforeRenderAction);
+            try
+            {
+                if (onBeforeRenderEvent != null) {
+                    onBeforeRenderEvent.RemoveEventHandler(null, onBeforeRenderAction);
+                }
+            }
+            catch (Exception exception)
+            {
+                ExplorerCore.LogWarning($"Failed to unlisten from BeforeRender: {exception}");
             }
         }
 

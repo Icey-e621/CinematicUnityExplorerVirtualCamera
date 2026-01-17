@@ -8,8 +8,13 @@ using UnityExplorer;
 
 namespace CinematicUnityExplorer.Cinematic
 {
+
     // StepCommand is basically the offset of step_left and step_up, what IGCS sends to move the camera.
     using StepCommand = Mono.CSharp.Tuple<float, float>;
+    public enum ECaptureDevice { CaptureDevice1 = 0, CaptureDevice2 = 1, CaptureDevice3 = 2, CaptureDevice4 = 3, CaptureDevice5 = 4, CaptureDevice6 = 5, CaptureDevice7 = 6, CaptureDevice8 = 7, CaptureDevice9 = 8, CaptureDevice10 = 9 }
+    public enum EResizeMode { Disabled = 0, LinearResize = 1 }
+    public enum EMirrorMode { Disabled = 0, MirrorHorizontally = 1 }
+    public enum ECaptureSendResult { SUCCESS = 0, WARNING_FRAMESKIP = 1, WARNING_CAPTUREINACTIVE = 2, ERROR_UNSUPPORTEDGRAPHICSDEVICE = 100, ERROR_PARAMETER = 101, ERROR_TOOLARGERESOLUTION = 102, ERROR_TEXTUREFORMAT = 103, ERROR_READTEXTURE = 104, ERROR_INVALIDCAPTUREINSTANCEPTR = 200 };
 
     internal static class NativeMethods
     {
@@ -19,6 +24,7 @@ namespace CinematicUnityExplorer.Cinematic
         [DllImport("kernel32.dll")]
         public static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
     }
+
     public class UnityIGCSConnector
     {
         // UnityIGCSConnector.dll definitions.
@@ -150,6 +156,35 @@ namespace CinematicUnityExplorer.Cinematic
             }
 
             isValid = true;
+        }
+    }
+    public class CameraExternal
+    {
+        [DllImport("UnityCapturePlugin.dll")] extern static System.IntPtr CaptureCreateInstance(int CapNum);
+        [DllImport("UnityCapturePlugin.dll")] extern static void CaptureDeleteInstance(System.IntPtr instance);
+        [DllImport("UnityCapturePlugin.dll")] extern static ECaptureSendResult CaptureSendTexture(System.IntPtr instance, System.IntPtr nativetexture, int Timeout, bool UseDoubleBuffering, EResizeMode ResizeMode, EMirrorMode MirrorMode, bool IsLinearColorSpace);
+        System.IntPtr CaptureInstance;
+
+        public CameraExternal(ECaptureDevice CaptureDevice)
+        {
+            CaptureInstance = CaptureCreateInstance((int)CaptureDevice);
+        }
+
+        ~CameraExternal()
+        {
+            Close();
+        }
+
+        public void Close()
+        {
+            if (CaptureInstance != System.IntPtr.Zero) CaptureDeleteInstance(CaptureInstance);
+            CaptureInstance = System.IntPtr.Zero;
+        }
+
+        public ECaptureSendResult SendTexture(IntPtr Source, int Timeout = 1000, bool DoubleBuffering = false, EResizeMode ResizeMode = EResizeMode.Disabled, EMirrorMode MirrorMode = EMirrorMode.Disabled)
+        {
+            if (CaptureInstance == System.IntPtr.Zero) return ECaptureSendResult.ERROR_INVALIDCAPTUREINSTANCEPTR;
+            return CaptureSendTexture(CaptureInstance, Source, Timeout, DoubleBuffering, ResizeMode, MirrorMode, QualitySettings.activeColorSpace == ColorSpace.Linear);
         }
     }
 }
