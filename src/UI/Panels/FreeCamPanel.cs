@@ -61,7 +61,7 @@ namespace UnityExplorer.UI.Panels
         public static Camera cameraMatrixOverrider;
         internal static FreeCamBehaviour freeCamScript;
         internal static CatmullRom.CatmullRomMover cameraPathMover;
-        internal static CameraExternal cameraExternal;
+        internal static SpoutSender spoutSender;
 
         internal static float desiredMoveSpeed = 5f;
 
@@ -258,13 +258,17 @@ namespace UnityExplorer.UI.Panels
 
         public static void AttachAndOpen()
         {
-            if (cameraExternal == null)
+            // Check if Spout is loaded first
+            if (!SpoutLoader.isLoaded)
+            {
+                MelonLogger.Error("Spout is not loaded. Cannot create virtual camera.");
+                return;
+            }
+
+            if (spoutSender == null)
             {
                 try
                 {
-                    cameraExternal = new CameraExternal(ECaptureDevice.CaptureDevice1);
-
-                    // Create RenderTexture if it doesn't exist
                     if (virtualCameraRenderTexture == null)
                     {
                         virtualCameraRenderTexture = new RenderTexture(
@@ -276,96 +280,100 @@ namespace UnityExplorer.UI.Panels
                         virtualCameraRenderTexture.Create();
                     }
 
-                    // Assign RenderTexture to camera
                     if (ourCamera != null)
                     {
                         ourCamera.targetTexture = virtualCameraRenderTexture;
                     }
 
-                    MelonLogger.Msg("Virtual camera initialized successfully");
+                    spoutSender = new SpoutSender();
+                    if (!spoutSender.Initialize("CUE FreeCam", VIRTUAL_CAMERA_WIDTH, VIRTUAL_CAMERA_HEIGHT))
+                    {
+                        throw new Exception("Failed to initialize Spout sender");
+                    }
+
+                    MelonLogger.Msg("Spout virtual camera initialized successfully");
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Error($"Failed to initialize virtual camera: {ex}");
+                    MelonLogger.Error($"Failed to initialize Spout: {ex}");
                     EndRetachAndClose();
                 }
             }
         }
 
+
         public static void SendTextureToVirtualCamera()
         {
-            if (cameraExternal != null && ourCamera != null && virtualCameraRenderTexture != null)
+            if (spoutSender != null && virtualCameraRenderTexture != null)
             {
                 try
                 {
-                    var result = cameraExternal.SendTexture(
-                        virtualCameraRenderTexture.GetNativeTexturePtr(),
-                        1000,
-                        false,
-                        EResizeMode.LinearResize,
-                        EMirrorMode.MirrorHorizontally
-                    );
-
-                    switch (result)
-                    {
-                        case ECaptureSendResult.SUCCESS:
-                            break;
-                        case ECaptureSendResult.ERROR_UNSUPPORTEDGRAPHICSDEVICE:
-                            MelonLogger.Error("[UnityCapture] Unsupported graphics device (only D3D11 supported)");
-                            EndRetachAndClose();
-                            break;
-                        case ECaptureSendResult.ERROR_PARAMETER:
-                            MelonLogger.Error("[UnityCapture] Input parameter error");
-                            break;
-                        case ECaptureSendResult.ERROR_TOOLARGERESOLUTION:
-                            MelonLogger.Error("[UnityCapture] Render resolution is too large");
-                            EndRetachAndClose();
-                            break;
-                        case ECaptureSendResult.ERROR_TEXTUREFORMAT:
-                            MelonLogger.Error("[UnityCapture] Unsupported texture format");
-                            EndRetachAndClose();
-                            break;
-                        case ECaptureSendResult.ERROR_READTEXTURE:
-                            MelonLogger.Error("[UnityCapture] Error reading texture data");
-                            break;
-                        case ECaptureSendResult.ERROR_INVALIDCAPTUREINSTANCEPTR:
-                            MelonLogger.Error("[UnityCapture] Invalid capture instance pointer");
-                            EndRetachAndClose();
-                            break;
-                    }
+                    spoutSender.SendFrame(virtualCameraRenderTexture);
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Error($"Error sending texture to virtual camera: {ex}");
+                    MelonLogger.Error($"Error sending texture to Spout: {ex}");
                 }
             }
         }
         public static void EndRetachAndClose()
         {
-            if (ourCamera != null)
+            bool wasActive = spoutSender != null || virtualCameraRenderTexture != null;
+
+            // Dispose of Spout sender first
+            if (spoutSender != null)
+            {
+                try
+                {
+                    spoutSender.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Error($"Error disposing Spout sender: {ex}");
+                }
+                finally
+                {
+                    spoutSender = null;
+                }
+            }
+
+            // Remove RenderTexture from camera before destroying it
+            if (ourCamera != null && ourCamera.targetTexture == virtualCameraRenderTexture)
             {
                 ourCamera.targetTexture = null;
             }
 
-            if (virtualCameraRenderTexture != null)
+            // Also check cameraMatrixOverrider if using ForcedMatrix mode
+            if (cameraMatrixOverrider != null && cameraMatrixOverrider.targetTexture == virtualCameraRenderTexture)
             {
-                virtualCameraRenderTexture.Release();
-                GameObject.Destroy(virtualCameraRenderTexture);
-                virtualCameraRenderTexture = null;
+                cameraMatrixOverrider.targetTexture = null;
             }
 
-            if (cameraExternal != null)
+            // Release and destroy RenderTexture
+            if (virtualCameraRenderTexture != null)
             {
                 try
                 {
-                    cameraExternal.Close();
-                    MelonLogger.Msg("Virtual camera Closed Successfully");
+                    // Make sure no other cameras are using this texture
+                    if (virtualCameraRenderTexture.IsCreated())
+                    {
+                        virtualCameraRenderTexture.Release();
+                    }
+                    GameObject.Destroy(virtualCameraRenderTexture);
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Error($"Error closing camera external: {ex}");
+                    MelonLogger.Error($"Error destroying RenderTexture: {ex}");
                 }
-                cameraExternal = null;
+                finally
+                {
+                    virtualCameraRenderTexture = null;
+                }
+            }
+
+            if (wasActive)
+            {
+                MelonLogger.Msg("Virtual camera closed successfully");
             }
         }
         static void SetupFreeCamera()
@@ -494,7 +502,12 @@ namespace UnityExplorer.UI.Panels
             inFreeCamMode = false;
             connector?.UpdateFreecamStatus(false);
 
-            switch(currentCameraType) {
+            if (SendCameraToVirtualCameraToggle != null && !SendCameraToVirtualCameraToggle.isOn)
+            {
+                EndRetachAndClose();
+            }
+
+            switch (currentCameraType) {
                 case FreeCameraType.Gameplay:
                     MaybeToggleCinemachine(true);
                     MaybeToggleOrthographic(true);
@@ -1063,7 +1076,7 @@ namespace UnityExplorer.UI.Panels
             EndFreecam();
             BeginFreecam();
         }
-
+        
         static void ResetCameraTransform()
         {
             currentUserCameraPosition = originalCameraPosition;

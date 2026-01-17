@@ -7,6 +7,8 @@ global using UnityEngine;
 global using UnityEngine.UI;
 global using UniverseLib;
 global using UniverseLib.Utility;
+using CinematicUnityExplorer.Cinematic;
+using MelonLoader;
 using UnityExplorer.CatmullRom;
 using UnityExplorer.Config;
 using UnityExplorer.ObjectExplorer;
@@ -57,8 +59,16 @@ namespace UnityExplorer
             ExplorerBehaviour.Setup();
             UnityCrashPrevention.Init();
 
+            // Load Spout on initialization
+            if (!SpoutLoader.LoadSpout())
+            {
+                MelonLogger.Error("Failed to load Spout - virtual camera feature will be disabled");
+            }
+
             //Extra inits
             ArrowGenerator.PatchLights();
+
+
         }
 
         // Do a delayed setup so that objects aren't destroyed instantly.

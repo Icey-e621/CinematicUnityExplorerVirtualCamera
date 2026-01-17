@@ -4,3 +4,6 @@
 [submodule "UnityCapture"]
 	path = UnityCapture
 	url = https://github.com/schellingb/UnityCapture.git
+[submodule "KlakSpout"]
+	path = KlakSpout
+	url = https://github.com/keijiro/KlakSpout.git
